@@ -1,0 +1,48 @@
+name: Deploy to EC2 (No Docker)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USER: ${{ secrets.EC2_USER }}
+        EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
+      run: |
+        echo "$EC2_KEY" > key.pem
+        chmod 400 key.pem
+
+        # Copy all files to EC2
+        rsync -avz -e "ssh -i key.pem -o StrictHostKeyChecking=no" \
+          --exclude='.git*' --exclude='key.pem' \
+          . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/fastapi-app/
+
+        # Restart the app on EC2
+        ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          cd /home/${{ secrets.EC2_USER }}/fastapi-app
+
+          # Install Python & pip if not already
+          sudo apt update -y
+          sudo apt install python3-pip -y
+
+          # Install/upgrade requirements
+          pip3 install -r requirements.txt --user
+
+          # Make start.sh executable
+          chmod +x start.sh
+
+          # Restart the app
+          ./start.sh
+        EOF
+
+        echo "Deployed successfully! Visit http://$EC2_HOST"
+        rm -f key.pem
